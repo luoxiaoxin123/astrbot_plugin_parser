@@ -243,6 +243,12 @@ class MessageSender:
         type_name = exc.__class__.__name__
         return any(key in type_name for key in ("ActionFailed", "Send", "Adapter"))
 
+    @staticmethod
+    def _is_local_file_missing(exc: Exception) -> bool:
+        """判断发送失败是否为适配器侧读取本地文件失败（常见于容器隔离场景）。"""
+        msg = str(exc)
+        return "ENOENT" in msg and "copyfile" in msg
+
 
     async def send_parse_result(
         self,
@@ -291,6 +297,19 @@ class MessageSender:
                 )
 
                 try:
+                    if self._is_local_file_missing(e) and result.url:
+                        await event.send(
+                            event.chain_result(
+                                [
+                                    Plain(
+                                        "媒体发送失败（适配器进程无法访问插件缓存目录），已降级发送原链接："
+                                    ),
+                                    Plain(result.url),
+                                ]
+                            )
+                        )
+                        return
+
                     await event.send(
                         event.chain_result(
                             [
